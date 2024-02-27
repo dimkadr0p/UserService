@@ -11,14 +11,35 @@ import javax.persistence.NoResultException;
 import javax.persistence.Query;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 
 @ApplicationScoped
 public class UserRepository {
 
-    public UserEntity findById(Long id) {
-        return executeInTransaction(entityManager -> entityManager.find(UserEntity.class, id));
+    private final Map<String, Optional<UserEntity>> userCache = new ConcurrentHashMap<>();
+
+    public Optional<UserEntity> findByPhoneNumber(String phoneNumber) {
+
+        Optional<UserEntity> resultCache = userCache.get(phoneNumber);
+
+        if (resultCache != null) {
+            return resultCache;
+        }
+
+        try {
+            return executeInTransaction(entityManager -> {
+                Query query = entityManager.createQuery("SELECT u FROM UserEntity u WHERE u.phoneNumber = :phone");
+                query.setParameter("phone", phoneNumber);
+                UserEntity userEntity = (UserEntity) query.getSingleResult();
+                userCache.put(phoneNumber, Optional.of(userEntity));
+                return Optional.of(userEntity);
+            });
+        } catch (NoResultException e) {
+            return Optional.empty();
+        }
     }
 
     public List<UserEntity> findAll() {
@@ -28,29 +49,10 @@ public class UserRepository {
         });
     }
 
-    public Optional<UserEntity> findByPhoneNumber(String phoneNumber) {
-        try {
-            return executeInTransaction(entityManager -> {
-                Query query = entityManager.createQuery("SELECT u FROM UserEntity u WHERE u.phoneNumber = :phone");
-                query.setParameter("phone", phoneNumber);
-                UserEntity userEntity = (UserEntity) query.getSingleResult();
-                return  Optional.of(userEntity);
-            });
-        } catch (NoResultException e) {
-            return Optional.empty();
-        }
-    }
-
-    public void update(UserEntity userEntity) {
-        executeInTransaction(entityManager -> {
-            entityManager.merge(userEntity);
-            return null;
-        });
-    }
-
     public void save(UserEntity userEntity) {
         executeInTransaction(entityManager -> {
             entityManager.persist(userEntity);
+            userCache.put(userEntity.getPhoneNumber(), Optional.of(userEntity));
             return null;
         });
     }
@@ -59,13 +61,8 @@ public class UserRepository {
         executeInTransaction(entityManager -> {
             entityManager.merge(userEntity);
             entityManager.merge(userEntity2);
-            return null;
-        });
-    }
-
-    public void delete(UserEntity userEntity) {
-        executeInTransaction(entityManager -> {
-            entityManager.remove(userEntity);
+            userCache.put(userEntity.getPhoneNumber(), Optional.of(userEntity));
+            userCache.put(userEntity2.getPhoneNumber(), Optional.of(userEntity2));
             return null;
         });
     }
